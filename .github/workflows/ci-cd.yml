@@ -1,0 +1,84 @@
+name: DevOps Pipeline Indicator
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deployment
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate Project Files
+        run: |
+          test -f index.html
+          test -f style.css
+          test -f script.js
+          echo "All project files found."
+
+      - name: Validate JavaScript
+        run: |
+          node --check script.js
+          echo "JavaScript syntax is valid."
+
+  test:
+    name: Test Application
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Get Source Code
+        uses: actions/checkout@v4
+
+      - name: Run Tests
+        run: |
+          echo "Running application validation..."
+          test -s index.html
+          test -s style.css
+          test -s script.js
+          node --check script.js
+          echo "All validation checks passed."
+
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Get Source Code
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy Website
+        id: deployment
+        uses: actions/deploy-pages@v4
