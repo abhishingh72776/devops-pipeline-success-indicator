@@ -1,3 +1,4 @@
+
 name: DevOps Pipeline Indicator
 
 on:
@@ -82,3 +83,66 @@ jobs:
       - name: Deploy Website
         id: deployment
         uses: actions/deploy-pages@v4
+
+  report:
+    name: Report Pipeline Result to AWS
+    runs-on: ubuntu-latest
+    needs: [build, test, deploy]
+    if: always()
+
+    steps:
+      - name: Prepare Pipeline Result
+        id: result
+        shell: bash
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+        run: |
+          echo "Build result: $BUILD_RESULT"
+          echo "Test result: $TEST_RESULT"
+          echo "Deploy result: $DEPLOY_RESULT"
+
+          if [[ "$BUILD_RESULT" == "failure" || "$TEST_RESULT" == "failure" || "$DEPLOY_RESULT" == "failure" ]]; then
+            echo "conclusion=failure" >> "$GITHUB_OUTPUT"
+          elif [[ "$BUILD_RESULT" == "cancelled" || "$TEST_RESULT" == "cancelled" || "$DEPLOY_RESULT" == "cancelled" ]]; then
+            echo "conclusion=cancelled" >> "$GITHUB_OUTPUT"
+          else
+            echo "conclusion=success" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send Result to AWS
+        shell: bash
+        env:
+          WEBHOOK_SECRET: ${{ secrets.AWS_PIPELINE_WEBHOOK_SECRET }}
+          CONCLUSION: ${{ steps.result.outputs.conclusion }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          jq -n \
+            --arg run_id "$RUN_ID" \
+            --arg workflow "$WORKFLOW_NAME" \
+            --arg branch "$BRANCH" \
+            --arg status "completed" \
+            --arg conclusion "$CONCLUSION" \
+            --arg commit "$COMMIT" \
+            --arg url "$RUN_URL" \
+            '{
+              run_id: $run_id,
+              workflow: $workflow,
+              branch: $branch,
+              status: $status,
+              conclusion: $conclusion,
+              commit: $commit,
+              url: $url
+            }' > payload.json
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            "https://8igfpsu19h.execute-api.us-east-1.amazonaws.com/default/DevOpsPipelineEventProcessor" \
+            -H "Content-Type: application/json" \
+            -H "x-webhook-secret: $WEBHOOK_SECRET" \
+            --data-binary @payload.json
