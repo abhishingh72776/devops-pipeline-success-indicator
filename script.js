@@ -31,6 +31,49 @@ function addLog(message, type = "") {
     logContainer.prepend(entry);
 }
 
+// Convert backend status into dashboard status
+function getRunStatus(run) {
+    if (run.status === "in_progress") {
+        return {
+            label: "RUNNING",
+            className: "running"
+        };
+    }
+
+    if (run.conclusion === "success") {
+        return {
+            label: "SUCCESS",
+            className: "success"
+        };
+    }
+
+    if (run.conclusion === "failure") {
+        return {
+            label: "FAILED",
+            className: "failure"
+        };
+    }
+
+    if (run.conclusion === "cancelled") {
+        return {
+            label: "CANCELLED",
+            className: "cancelled"
+        };
+    }
+
+    if (run.status === "queued") {
+        return {
+            label: "QUEUED",
+            className: "queued"
+        };
+    }
+
+    return {
+        label: "UNKNOWN",
+        className: "unknown"
+    };
+}
+
 // Update statistics using real records
 function updateStats(runs) {
     const total = runs.length;
@@ -43,9 +86,16 @@ function updateStats(runs) {
         run => run.conclusion === "failure"
     ).length;
 
-    const rate = total === 0
+    // Running executions are excluded from the success-rate calculation
+    const completed = runs.filter(
+        run => run.conclusion === "success" ||
+               run.conclusion === "failure" ||
+               run.conclusion === "cancelled"
+    ).length;
+
+    const rate = completed === 0
         ? 0
-        : Math.round((successful / total) * 100);
+        : Math.round((successful / completed) * 100);
 
     totalBuilds.textContent = total;
     successfulBuilds.textContent = successful;
@@ -63,15 +113,20 @@ function updateLatestStatus(runs) {
     }
 
     const latest = runs[0];
+    const status = getRunStatus(latest);
 
-    if (latest.conclusion === "success") {
+    if (status.className === "running") {
+        mainStatus.textContent = "Pipeline Running";
+    } else if (status.className === "success") {
         mainStatus.textContent = "Pipeline Successful";
-    } else if (latest.conclusion === "failure") {
+    } else if (status.className === "failure") {
         mainStatus.textContent = "Pipeline Failed";
-    } else if (latest.conclusion === "cancelled") {
+    } else if (status.className === "cancelled") {
         mainStatus.textContent = "Pipeline Cancelled";
+    } else if (status.className === "queued") {
+        mainStatus.textContent = "Pipeline Queued";
     } else {
-        mainStatus.textContent = "Pipeline Completed";
+        mainStatus.textContent = "Pipeline Status Unknown";
     }
 
     statusDescription.textContent =
@@ -97,16 +152,14 @@ function updateHistory(runs) {
         const statusCell = document.createElement("td");
         const badge = document.createElement("span");
 
-        badge.className =
-            `status-pill ${run.conclusion || "unknown"}`;
+        const status = getRunStatus(run);
 
-        badge.textContent =
-            (run.conclusion || "UNKNOWN").toUpperCase();
+        badge.className = `status-pill ${status.className}`;
+        badge.textContent = status.label;
 
         statusCell.appendChild(badge);
 
         const timeCell = document.createElement("td");
-
         const date = new Date(run.received_at);
 
         timeCell.textContent = isNaN(date.getTime())
@@ -131,7 +184,6 @@ async function loadPipelineData() {
         }
 
         const data = await response.json();
-
         const runs = data.runs || [];
 
         updateStats(runs);
@@ -164,5 +216,5 @@ runButton.addEventListener("click", loadPipelineData);
 // Load data when dashboard opens
 loadPipelineData();
 
-// Automatically refresh every 30 seconds
-setInterval(loadPipelineData, 30000);
+// Check AWS every 5 seconds for live status updates
+setInterval(loadPipelineData, 5000);
